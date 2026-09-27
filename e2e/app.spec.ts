@@ -81,6 +81,7 @@ test('generates ordered recipes and restores a stable source sample after reimpo
     await selectTone(page, tone)
     await expectMixPresentation(page, tone)
   }
+  await expect(page).toHaveScreenshot('family-colour-selection-mobile.png', { fullPage: true })
   await tapCanvas(page, .25, .25)
   await expect(page.getByTestId('selected-colour')).toHaveText(/^#b4643c/)
   await tapCanvas(page, .5, .405)
@@ -109,6 +110,8 @@ test('generates ordered recipes and restores a stable source sample after reimpo
   await page.getByRole('button', { name: 'Sample 1' }).click()
   await expect(page.getByText('Saved result loaded. Reimport its source image to inspect its location.')).toBeVisible()
   await expect(page.getByLabel(/Saved sample location unavailable/)).toBeVisible()
+  await selectTone(page, 'Deep Shadow')
+  await expectMixPresentation(page, 'Deep Shadow')
   await page.getByLabel('Choose reference photo').setInputFiles(tonalImage)
   await expect(page.getByRole('status')).toHaveText('Colour family and recipes ready.')
   await page.getByRole('button', { name: 'Sample 1' }).click()
@@ -132,6 +135,7 @@ test.describe('desktop layout', () => {
     await expectMixPresentation(page, 'Base')
     await selectTone(page, 'Shadow')
     await expectMixPresentation(page, 'Shadow')
+    await expect(page).toHaveScreenshot('family-colour-selection-desktop.png', { fullPage: true })
     const [usedColours, image, alternatives] = await Promise.all([
       page.getByTestId('used-colours').boundingBox(),
       page.getByLabel(/Reference image/).boundingBox(),
