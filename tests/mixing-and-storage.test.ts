@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { labToColour, rgbToColour } from '../src/lib/color'
-import { CATALOGUE, optimizeRecipes, type MixingModel } from '../src/lib/mixing'
+import { CATALOGUE, optimizeRecipes, suggestAddition, type MixingModel } from '../src/lib/mixing'
 import { storage } from '../src/lib/storage'
 
 describe('mixing and recovery', () => {
@@ -29,6 +29,11 @@ describe('mixing and recovery', () => {
     expect(recipes.complex.parts.map(part => part.paint.code)).toEqual(['105', '701'])
     expect(recipes.complex.parts.map(part => part.parts)).toEqual([1, 9])
     expect(recipes.complex.deltaE).toBe(0)
+  })
+
+  it('withholds additions that cannot improve an observed exact mix', () => {
+    const exact = rgbToColour({ r: 110, g: 80, b: 60 })
+    expect(suggestAddition(exact.lab, exact)).toBeUndefined()
   })
 
   it('persists image, immutable palette, settings, samples, and mix history', async () => {

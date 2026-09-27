@@ -69,12 +69,14 @@ export function optimizeRecipes(target: Lab, model: MixingModel = labMixingModel
   return { simple, complex: refine(target, simple, model) }
 }
 
-export function suggestAddition(target: Lab, current: Recipe, model: MixingModel = labMixingModel) {
+export function suggestAddition(target: Lab, current: Colour, model: MixingModel = labMixingModel) {
+  const baseline = deltaE2000(target, current.lab)
+  const observed: Paint = { code: 'observed', name: 'Observed mix', colour: current }
   let best: { paint: Paint; deltaE: number } | undefined
   for (const paint of CATALOGUE) {
-    const next = model.mix([...current.parts.map(part => ({ paint: part.paint, amount: part.percent / 105 })), { paint, amount: 5 / 105 }])
+    const next = model.mix([{ paint: observed, amount: .95 }, { paint, amount: .05 }])
     const deltaE = deltaE2000(target, next.lab)
-    if (!best || deltaE < best.deltaE) best = { paint, deltaE }
+    if (deltaE < baseline - 1e-9 && (!best || deltaE < best.deltaE)) best = { paint, deltaE }
   }
-  return best!
+  return best
 }

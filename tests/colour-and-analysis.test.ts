@@ -19,6 +19,13 @@ describe('image analysis', () => {
     expect(colour.rgb.g).toBe(50)
   })
 
+  it('samples the central comparison region instead of a corner background', () => {
+    const data = new Uint8ClampedArray(100 * 100 * 4)
+    for (let index = 0; index < data.length; index += 4) data.set([150, 75, 40, 255], index)
+    data.set([0, 0, 255, 255], 0)
+    expect(sampleRegion(data, 100, 100, { x: 50, y: 50 }, 81).rgb).toEqual({ r: 150, g: 75, b: 40 })
+  })
+
   it('clusters related context, rejects unrelated hues, and generates sparse tonal variation', () => {
     const base = rgbToColour({ r: 150, g: 75, b: 40 })
     const light = rgbToColour({ r: 205, g: 130, b: 85 })
