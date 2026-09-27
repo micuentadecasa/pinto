@@ -1,6 +1,6 @@
 {
   "index.html": {
-    "file": "assets/index-D5Ll-jXt.js",
+    "file": "assets/index-kGWmYyMW.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -8,10 +8,10 @@
       "index.html"
     ],
     "css": [
-      "assets/index-B7l6sD_r.css"
+      "assets/index-1tAL4Fy1.css"
     ],
     "assets": [
-      "assets/analyser.worker-C9Wnd_mx.js"
+      "assets/analyser.worker-DeNoFVX9.js"
     ]
   }
 }
