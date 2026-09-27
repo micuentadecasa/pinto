@@ -61,7 +61,9 @@ export default function App() {
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [point, setPoint] = useState({ x: 0, y: 0 })
-  const [magnifier, setMagnifier] = useState({ x: 8, y: 8 })
+  const [magnifier, setMagnifier] = useState({ x: 8, y: 8, size: magnifierSize })
+  const [magnifierPoint, setMagnifierPoint] = useState<Point>({ x: 0, y: 0 })
+  const [display, setDisplay] = useState({ width: 1, height: 1 })
   const [samples, setSamples] = useState<SavedSample[]>([])
   const [sampleName, setSampleName] = useState('')
   const [history, setHistory] = useState<MixHistoryEntry[]>([])
@@ -99,6 +101,7 @@ export default function App() {
       setImage(loaded)
       const selectedPoint = { x: loaded.width / 2, y: loaded.height / 2 }
       setPoint(selectedPoint)
+      setMagnifierPoint(selectedPoint)
       setNotice('Restored your last on-device image.')
       setTimeout(() => analyse(selectedPoint, loaded), 0)
     }).catch(() => {})
@@ -112,6 +115,8 @@ export default function App() {
   useEffect(() => {
     if (!image || !canvasRef.current) return
     const canvas = canvasRef.current
+    const bounds = canvas.getBoundingClientRect()
+    setDisplay(current => current.width === bounds.width && current.height === bounds.height ? current : { width: bounds.width, height: bounds.height })
     const context = canvas.getContext('2d')!
     context.clearRect(0, 0, canvas.width, canvas.height)
     context.save()
@@ -151,6 +156,7 @@ export default function App() {
       setPan({ x: 0, y: 0 })
       const selectedPoint = { x: loaded.width / 2, y: loaded.height / 2 }
       setPoint(selectedPoint)
+      setMagnifierPoint(selectedPoint)
       await storage.saveLastImage({ id: 'last', blob: loaded.blob, width: loaded.width, height: loaded.height, updatedAt: Date.now() })
       setNotice('Image kept on this device. Tap the photo to sample.')
       setTimeout(() => analyse(selectedPoint, loaded), 0)
@@ -164,9 +170,10 @@ export default function App() {
     const pointerX = clientX - rect.left
     const pointerY = clientY - rect.top
     const gap = 28
-    const left = pointerX + magnifierSize + gap <= rect.width ? pointerX + gap : pointerX - magnifierSize - gap
-    const top = pointerY - magnifierSize - gap >= 0 ? pointerY - magnifierSize - gap : pointerY + gap
-    setMagnifier({ x: Math.max(8, Math.min(rect.width - magnifierSize - 8, left)), y: Math.max(8, Math.min(rect.height - magnifierSize - 8, top)) })
+    const size = Math.min(magnifierSize, rect.width - 16, rect.height - 16)
+    const left = pointerX + size + gap <= rect.width - 8 ? pointerX + gap : pointerX - size - gap
+    const top = pointerY - size - gap >= 8 ? pointerY - size - gap : pointerY + gap
+    setMagnifier({ x: Math.max(8, Math.min(rect.width - size - 8, left)), y: Math.max(8, Math.min(rect.height - size - 8, top)), size })
   }
 
   const pointer = (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -175,6 +182,8 @@ export default function App() {
     placeMagnifier(rect, event.clientX, event.clientY)
     if (event.type === 'pointerdown') {
       event.currentTarget.setPointerCapture(event.pointerId)
+      const pendingPoint = screenToImage({ x: event.clientX, y: event.clientY }, viewport(rect), image)
+      setMagnifierPoint(pendingPoint)
       drag.current = { sourceStart: screenToImage({ x: event.clientX, y: event.clientY }, viewport(rect, { x: 0, y: 0 }), image, false), pan, moved: false }
       return
     }
@@ -182,7 +191,9 @@ export default function App() {
       const current = screenToImage({ x: event.clientX, y: event.clientY }, viewport(rect, { x: 0, y: 0 }), image, false)
       const delta = { x: current.x - drag.current.sourceStart.x, y: current.y - drag.current.sourceStart.y }
       if (Math.hypot(delta.x, delta.y) > 5) drag.current.moved = true
-      if (drag.current.moved) setPan({ x: drag.current.pan.x + delta.x, y: drag.current.pan.y + delta.y })
+      const pendingPan = drag.current.moved ? { x: drag.current.pan.x + delta.x, y: drag.current.pan.y + delta.y } : pan
+      setMagnifierPoint(screenToImage({ x: event.clientX, y: event.clientY }, viewport(rect, pendingPan), image))
+      if (drag.current.moved) setPan(pendingPan)
       return
     }
     if (event.type === 'pointercancel') {
@@ -195,6 +206,7 @@ export default function App() {
       if (!moved) {
         const selectedPoint = screenToImage({ x: event.clientX, y: event.clientY }, viewport(rect), image)
         setPoint(selectedPoint)
+        setMagnifierPoint(selectedPoint)
         analyse(selectedPoint)
       }
     }
@@ -231,10 +243,12 @@ export default function App() {
     }
   }
 
+  const magnifiedPoint = image ? imageToScreen(magnifierPoint, { left: 0, top: 0, displayWidth: display.width, displayHeight: display.height, zoom, pan }, image) : { x: 0, y: 0 }
+
   return <main>
     <header><div><h1>Pinto</h1><p>Van Gogh basic oils mixer</p></div><strong className="private">🔒 Photos never leave this device</strong></header>
     <section className="intro"><h2>Match a colour from a photo</h2><p>Recipe estimates use photographed colour in CIELAB, not a physical pigment calibration.</p><div className="actions"><label className="button">Camera<input aria-label="Take reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={event => chooseFile(event.target.files?.[0])} /></label><label className="button secondary">Choose photo<input aria-label="Choose reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={event => chooseFile(event.target.files?.[0])} /></label></div></section>
-    {image && <><section className="viewer"><canvas aria-label="Reference image. Tap to select colour; drag to pan." ref={canvasRef} width={image.width} height={image.height} onPointerDown={pointer} onPointerMove={pointer} onPointerUp={pointer} onPointerCancel={pointer} /><div aria-label="5× magnifier" className="magnifier" style={{ left: magnifier.x, top: magnifier.y, backgroundImage: `url(${image.url})`, backgroundSize: `${image.width * 5}px ${image.height * 5}px`, backgroundPosition: `${magnifierSize / 2 - point.x * 5}px ${magnifierSize / 2 - point.y * 5}px` }}>+</div></section><div className="controls"><label>Zoom <input aria-label="Zoom" type="range" min="1" max="8" step=".25" value={zoom} onChange={event => setZoom(+event.target.value)} />{zoom.toFixed(2)}×</label><label>Sample area <select value={region} onChange={event => setRegion(+event.target.value)}>{sizes.map(size => <option key={size}>{size}×{size}</option>)}</select></label><button onClick={() => analyse(point)}>Resample</button></div></>}
+    {image && <><section className="viewer"><canvas aria-label="Reference image. Tap to select colour; drag to pan." ref={canvasRef} width={image.width} height={image.height} onPointerDown={pointer} onPointerMove={pointer} onPointerUp={pointer} onPointerCancel={pointer} /><div aria-label="5× magnifier" className="magnifier" style={{ left: magnifier.x, top: magnifier.y, width: magnifier.size, height: magnifier.size, lineHeight: `${magnifier.size - 6}px`, backgroundImage: `url(${image.url})`, backgroundSize: `${display.width * zoom * 5}px ${display.height * zoom * 5}px`, backgroundPosition: `${magnifier.size / 2 - magnifiedPoint.x * 5}px ${magnifier.size / 2 - magnifiedPoint.y * 5}px` }}>+</div></section><div className="controls"><label>Zoom <input aria-label="Zoom" type="range" min="1" max="8" step=".25" value={zoom} onChange={event => setZoom(+event.target.value)} />{zoom.toFixed(2)}×</label><label>Sample area <select value={region} onChange={event => setRegion(+event.target.value)}>{sizes.map(size => <option key={size}>{size}×{size}</option>)}</select></label><button onClick={() => analyse(point)}>Resample</button></div></>}
     <p className="notice" role="status">{notice}</p>
     {analysis && active && <><section className="colour"><i style={{ background: active.colour.hex }} /><div><h2>{active.name}</h2><p data-testid="selected-colour">{active.colour.hex} · sRGB {active.colour.rgb.r}, {active.colour.rgb.g}, {active.colour.rgb.b}</p><p>XYZ {Object.values(active.colour.xyz).map(value => value.toFixed(1)).join(', ')} · Lab {Object.values(active.colour.lab).map(value => value.toFixed(1)).join(', ')}</p></div><label>Sample name <input aria-label="Sample name" value={sampleName} onChange={event => setSampleName(event.target.value)} /></label><button onClick={save}>Save sample</button></section><section><h2>Colour family</h2><div className="swatches">{analysis.tones.map(tone => <Swatch key={tone.name} tone={tone} selected={selectedTone === tone.name} onClick={() => setSelectedTone(tone.name)} />)}</div></section><section><h2>Mix recipes</h2><RecipeCard recipe={analysis.recipes[selectedTone].simple} /><RecipeCard recipe={analysis.recipes[selectedTone].complex} /></section><section><h2>Check my mix</h2><p>Photograph a small, evenly lit dab and compare it with {active.name}.</p><label className="button secondary">Capture / import mix<input aria-label="Check my mix photo" type="file" accept="image/*" capture="environment" onChange={event => compare(event.target.files?.[0])} /></label></section></>}
     {samples.length > 0 && <section><h2>Saved samples ({samples.length})</h2>{samples.map(sample => <button key={sample.id} className="saved" onClick={() => { setAnalysis({ colour: sample.colour, tones: sample.tones, recipes: sample.recipes }); setSelectedTone('Base') }}><i style={{ background: sample.colour.hex }} />{sample.name}</button>)}</section>}
