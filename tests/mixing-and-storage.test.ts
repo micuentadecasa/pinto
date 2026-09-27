@@ -1,7 +1,37 @@
 import { describe, expect, it } from 'vitest'
+import { rgbToColour } from '../src/lib/color'
 import { CATALOGUE, optimizeRecipes } from '../src/lib/mixing'
 import { storage } from '../src/lib/storage'
-import { rgbToColour } from '../src/lib/color'
 
-describe('mixing and recovery',()=>{it('is deterministic and never leaves fixed catalogue',()=>{const t=rgbToColour({r:110,g:80,b:60}).lab,a=optimizeRecipes(t),b=optimizeRecipes(t);expect(a.complex.parts).toEqual(b.complex.parts);for(const p of [...a.simple.parts,...a.complex.parts])expect(CATALOGUE).toContain(p.paint);expect(a.complex.parts.length).toBeLessThanOrEqual(4)})
-it('persists last normalised image and samples',async()=>{const blob=new Blob(['pixels'],{type:'image/png'});await storage.saveLastImage({id:'last',blob,width:5,height:7,updatedAt:1});expect((await storage.getLastImage())?.width).toBe(5);const colour=rgbToColour({r:1,g:2,b:3});await storage.saveSample({id:'a',imageId:'last',name:'Sample',point:{x:.5,y:.5},colour,tones:[],recipes:{},createdAt:1});expect((await storage.getSamples()).map(s=>s.id)).toContain('a')})})
+describe('mixing and recovery', () => {
+  it('deterministically refines the coarse recipe without leaving the fixed catalogue', () => {
+    const target = rgbToColour({ r: 110, g: 80, b: 60 }).lab
+    const first = optimizeRecipes(target)
+    const second = optimizeRecipes(target)
+    expect(first.complex.parts).toEqual(second.complex.parts)
+    expect(first.complex.deltaE).toBeLessThanOrEqual(first.simple.deltaE)
+    expect(first.complex.parts.map(part => part.paint.code)).toEqual(first.simple.parts.map(part => part.paint.code))
+    for (const part of [...first.simple.parts, ...first.complex.parts]) expect(CATALOGUE).toContain(part.paint)
+    expect(first.complex.parts.length).toBeLessThanOrEqual(4)
+  })
+
+  it('persists image, immutable palette, settings, samples, and mix history', async () => {
+    const blob = new Blob(['pixels'], { type: 'image/png' })
+    const colour = rgbToColour({ r: 1, g: 2, b: 3 })
+    const recipes = optimizeRecipes(colour.lab)
+    await storage.saveLastImage({ id: 'last', blob, width: 5, height: 7, updatedAt: 1 })
+    await storage.ensurePalette(CATALOGUE)
+    await storage.ensurePalette([])
+    await storage.saveSettings({ region: 41, zoom: 2 })
+    await Promise.all([
+      storage.saveSample({ id: 'a', imageId: 'last', name: 'A', point: { x: .25, y: .5 }, colour, tones: [], recipes: {}, createdAt: 1 }),
+      storage.saveSample({ id: 'b', imageId: 'last', name: 'B', point: { x: .75, y: .5 }, colour, tones: [], recipes: {}, createdAt: 2 }),
+    ])
+    await storage.saveMixHistory({ id: 'mix-a', imageId: 'last', sampleId: 'a', tone: 'Base', recipe: recipes, createdAt: 1 })
+    expect((await storage.getLastImage())?.width).toBe(5)
+    expect((await storage.getPalette())?.paints.map(paint => paint.code)).toEqual(CATALOGUE.map(paint => paint.code))
+    expect(await storage.getSettings()).toEqual({ region: 41, zoom: 2 })
+    expect((await storage.getSamples()).map(sample => sample.id)).toEqual(expect.arrayContaining(['a', 'b']))
+    expect((await storage.getMixHistory()).map(entry => entry.id)).toContain('mix-a')
+  })
+})
