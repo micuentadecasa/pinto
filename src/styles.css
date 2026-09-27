@@ -11,13 +11,9 @@ h2 { margin-bottom: 5px; font-size: 1.08rem; }
 section { margin-top: 12px; }
 small, footer { color: #607068; font-size: .8rem; }
 
-.app-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 8px; border-bottom: 2px solid #d8d0c2; }
-.header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
-.private { flex: none; padding: 5px 7px; border-radius: 9px; background: #dcebe3; color: #164f39; font-size: .72rem; text-align: center; }
-.intro { padding: 8px 0 2px; }
-.intro p { margin-top: 3px; color: #52645c; font-size: .9rem; }
-.actions, .controls { display: flex; flex-wrap: wrap; gap: 8px; }
-.actions { margin-top: 8px; }
+.app-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 6px; border-bottom: 2px solid #d8d0c2; }
+.header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .button, button { min-height: 40px; padding: 8px 11px; border: 0; border-radius: 9px; background: #17634b; color: white; cursor: pointer; }
 .secondary, button.secondary { background: #e5ded0; color: #21362e; }
 .button input { display: none; }
@@ -38,8 +34,8 @@ small, footer { color: #607068; font-size: .8rem; }
 .mix-paints span { margin-top: 4px; font-size: .72rem; font-weight: 650; line-height: 1.12; }
 .mix-paints small { margin-top: 2px; font-size: .68rem; line-height: 1.1; }
 
-.viewer { position: relative; overflow: hidden; border-radius: 12px; background: #253630; line-height: 0; box-shadow: 0 2px 8px #1c2e2740; }
-.viewer canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: crosshair; }
+.viewer { position: relative; height: clamp(230px, 34svh, 320px); overflow: hidden; border-radius: 12px; background: #253630; line-height: 0; box-shadow: 0 2px 8px #1c2e2740; }
+.viewer canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
 .magnifier { position: absolute; border: 2px solid white; border-radius: 50%; box-shadow: 0 1px 5px #0009, inset 0 0 0 1px #173a31; pointer-events: none; }
 .controls { align-items: center; padding: 8px 0 0; }
 .controls label { display: flex; align-items: center; gap: 6px; padding: 5px 7px; border-radius: 8px; background: #ede7da; }
@@ -74,8 +70,6 @@ footer { margin-top: 24px; padding-top: 9px; border-top: 1px solid #d8d0c2; }
   main { padding: 20px 24px 40px; }
   h1 { font-size: 1.8rem; }
   h2 { font-size: 1.18rem; }
-  .private { padding: 7px 9px; font-size: .78rem; }
-  .intro { padding-top: 12px; }
   .used-colours { padding: 12px; }
   .mix-paints { gap: 12px; }
   .controls { padding-top: 10px; }

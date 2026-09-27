@@ -6,9 +6,23 @@ import { storage, type MixHistoryEntry, type SavedSample } from './lib/storage'
 
 type Analysis = { colour: Colour; tones: Tone[]; recipes: Record<string, { simple: Recipe; complex: Recipe }> }
 type Loaded = { id: string; url: string; blob: Blob; width: number; height: number; canvas: HTMLCanvasElement }
-type Drag = { sourceStart: Point; pan: Point; moved: boolean }
+type Drag = { pointerId: number; sourceStart: Point; pan: Point; moved: boolean; canSample: boolean }
+type Pinch = { distance: number; zoom: number; anchor: Point }
 
 const magnifierSize = 48
+const minZoom = 1
+const maxZoom = 8
+
+function clampZoom(zoom: number) {
+  return Math.max(minZoom, Math.min(maxZoom, zoom))
+}
+
+function constrainPan(pan: Point, zoom: number, image: Pick<Loaded, 'width' | 'height'>): Point {
+  return {
+    x: Math.max(image.width / zoom - image.width, Math.min(0, pan.x)),
+    y: Math.max(image.height / zoom - image.height, Math.min(0, pan.y)),
+  }
+}
 
 async function sourceId(file: Blob): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
@@ -102,6 +116,9 @@ export default function App() {
   const [notice, setNotice] = useState('Choose a reference photo to start.')
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drag = useRef<Drag | undefined>(undefined)
+  const pointers = useRef(new Map<number, Point>())
+  const pinch = useRef<Pinch | undefined>(undefined)
+  const didPinch = useRef(false)
   const worker = useRef<Worker | undefined>(undefined)
   const generation = useRef(0)
 
@@ -191,7 +208,7 @@ export default function App() {
         if (previous) URL.revokeObjectURL(previous.url)
         return loaded
       })
-      setZoom(1)
+      setZoom(minZoom)
       setPan({ x: 0, y: 0 })
       const selectedPoint = { x: loaded.width / 2, y: loaded.height / 2 }
       setPoint(selectedPoint)
@@ -203,34 +220,99 @@ export default function App() {
   }
 
   const viewport = (rect: DOMRect, viewportPan = pan): Viewport => ({ left: rect.left, top: rect.top, displayWidth: rect.width, displayHeight: rect.height, zoom, pan: viewportPan })
+  const clientPoint = (event: React.PointerEvent<HTMLCanvasElement>): Point => ({ x: event.clientX, y: event.clientY })
+
+  const startDrag = (pointerId: number, start: Point, rect: DOMRect, canSample: boolean) => {
+    if (!image) return
+    drag.current = {
+      pointerId,
+      sourceStart: screenToImage(start, viewport(rect, { x: 0, y: 0 }), image, false),
+      pan,
+      moved: false,
+      canSample,
+    }
+  }
+
+  const startPinch = (rect: DOMRect) => {
+    if (!image || pointers.current.size < 2) return
+    const [first, second] = [...pointers.current.values()]
+    const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 }
+    pinch.current = {
+      distance: Math.hypot(first.x - second.x, first.y - second.y),
+      zoom,
+      anchor: screenToImage(center, viewport(rect), image, false),
+    }
+  }
 
   const pointer = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (!image) return
-    const rect = event.currentTarget.getBoundingClientRect()
+    const canvas = event.currentTarget
+    const rect = canvas.getBoundingClientRect()
+    const currentPoint = clientPoint(event)
     if (event.type === 'pointerdown') {
-      event.currentTarget.setPointerCapture(event.pointerId)
-      drag.current = { sourceStart: screenToImage({ x: event.clientX, y: event.clientY }, viewport(rect, { x: 0, y: 0 }), image, false), pan, moved: false }
-      return
-    }
-    if (event.type === 'pointermove' && drag.current) {
-      const current = screenToImage({ x: event.clientX, y: event.clientY }, viewport(rect, { x: 0, y: 0 }), image, false)
-      const delta = { x: current.x - drag.current.sourceStart.x, y: current.y - drag.current.sourceStart.y }
-      if (Math.hypot(delta.x, delta.y) > 5) drag.current.moved = true
-      if (drag.current.moved) setPan({ x: drag.current.pan.x + delta.x, y: drag.current.pan.y + delta.y })
-      return
-    }
-    if (event.type === 'pointercancel') {
-      drag.current = undefined
-      return
-    }
-    if (event.type === 'pointerup' && drag.current) {
-      const moved = drag.current.moved
-      drag.current = undefined
-      if (!moved) {
-        const selectedPoint = screenToImage({ x: event.clientX, y: event.clientY }, viewport(rect), image)
-        setPoint(selectedPoint)
-        analyse(selectedPoint)
+      try {
+        canvas.setPointerCapture(event.pointerId)
+      } catch {
+        // Synthetic pointer events cannot be captured, but still exercise the gesture logic.
       }
+      pointers.current.set(event.pointerId, currentPoint)
+      if (pointers.current.size === 1) {
+        didPinch.current = false
+        pinch.current = undefined
+        startDrag(event.pointerId, currentPoint, rect, true)
+      } else if (pointers.current.size === 2) {
+        drag.current = undefined
+        didPinch.current = true
+        startPinch(rect)
+      }
+      return
+    }
+    if (!pointers.current.has(event.pointerId)) return
+    if (event.type === 'pointermove') {
+      pointers.current.set(event.pointerId, currentPoint)
+      if (pointers.current.size >= 2 && pinch.current) {
+        const [first, second] = [...pointers.current.values()]
+        const distance = Math.hypot(first.x - second.x, first.y - second.y)
+        if (distance === 0 || pinch.current.distance === 0) return
+        const nextZoom = clampZoom(pinch.current.zoom * distance / pinch.current.distance)
+        const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 }
+        const localCenter = {
+          x: (center.x - rect.left) * image.width / rect.width,
+          y: (center.y - rect.top) * image.height / rect.height,
+        }
+        setZoom(nextZoom)
+        setPan(constrainPan({
+          x: localCenter.x / nextZoom - pinch.current.anchor.x,
+          y: localCenter.y / nextZoom - pinch.current.anchor.y,
+        }, nextZoom, image))
+        return
+      }
+      const activeDrag = drag.current
+      if (!activeDrag || activeDrag.pointerId !== event.pointerId) return
+      const source = screenToImage(currentPoint, viewport(rect, { x: 0, y: 0 }), image, false)
+      const delta = { x: source.x - activeDrag.sourceStart.x, y: source.y - activeDrag.sourceStart.y }
+      if (Math.hypot(delta.x, delta.y) > 5) activeDrag.moved = true
+      if (activeDrag.moved) setPan(constrainPan({ x: activeDrag.pan.x + delta.x, y: activeDrag.pan.y + delta.y }, zoom, image))
+      return
+    }
+
+    const activeDrag = drag.current
+    pointers.current.delete(event.pointerId)
+    if (event.type === 'pointerup' && activeDrag?.pointerId === event.pointerId && !activeDrag.moved && activeDrag.canSample && !didPinch.current) {
+      const selectedPoint = screenToImage(currentPoint, viewport(rect), image)
+      setPoint(selectedPoint)
+      analyse(selectedPoint)
+    }
+    drag.current = undefined
+    if (pointers.current.size === 1) {
+      const [remainingId, remainingPoint] = [...pointers.current.entries()][0]
+      pinch.current = undefined
+      startDrag(remainingId, remainingPoint, rect, false)
+    } else if (pointers.current.size === 0) {
+      pinch.current = undefined
+      didPinch.current = false
+    } else {
+      startPinch(rect)
     }
   }
 
@@ -294,10 +376,13 @@ export default function App() {
   const primaryRecipe = analysis && active ? analysis.recipes[selectedTone].complex : undefined
 
   return <main>
-    <header className="app-header"><h1>Pinto</h1><div className="header-actions"><label className="button">Camera<input aria-label="Take reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={event => chooseFile(event.target.files?.[0])} /></label><strong className="private">🔒 Photos never leave this device</strong></div></header>
-    <section className="intro"><h2>Match a colour from a photo</h2><p>Tap one exact pixel to get a paint-mix estimate.</p><div className="actions"><label className="button secondary">Choose photo<input aria-label="Choose reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={event => chooseFile(event.target.files?.[0])} /></label></div></section>
+    <header className="app-header"><h1>Pinto</h1><div className="header-actions"><label className="button">Camera<input aria-label="Take reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={event => chooseFile(event.target.files?.[0])} /></label><label className="button secondary">Choose photo<input aria-label="Choose reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={event => chooseFile(event.target.files?.[0])} /></label></div></header>
     {active && primaryRecipe && <section className="used-colours" data-testid="used-colours" aria-labelledby="used-colours-heading"><div className="used-colours-summary"><div><h2 id="used-colours-heading">Colours in the selected mix</h2><p>{active?.name} · closest match</p></div><SelectedMixColour colour={active.colour} /></div><p className="ingredient-label">Paint ingredients</p><PaintCircles recipe={primaryRecipe} /></section>}
-    {image && <><section className="viewer"><canvas aria-label={showingSampleLocation ? 'Reference image. Tap to select colour; drag to pan.' : 'Reference image. Saved sample location unavailable; reimport its source image.'} ref={canvasRef} width={image.width} height={image.height} onPointerDown={pointer} onPointerMove={pointer} onPointerUp={pointer} onPointerCancel={pointer} /><div aria-label="Selected pixel magnifier" className="magnifier" title={selectedPixel?.hex} style={{ left: magnifiedPoint.x - magnifierSize / 2, top: magnifiedPoint.y - magnifierSize / 2, width: magnifierSize, height: magnifierSize, background: selectedPixel?.hex }} /></section><div className="controls"><label>Zoom <input aria-label="Zoom" type="range" min="1" max="8" step=".25" value={zoom} onChange={event => setZoom(+event.target.value)} />{zoom.toFixed(2)}×</label><button onClick={() => analyse(point)}>Resample exact pixel</button></div></>}
+    {image && <><section className="viewer"><canvas aria-label={showingSampleLocation ? 'Reference image. Tap to select colour; drag to pan; pinch with two fingers to zoom.' : 'Reference image. Saved sample location unavailable; reimport its source image.'} ref={canvasRef} width={image.width} height={image.height} onPointerDown={pointer} onPointerMove={pointer} onPointerUp={pointer} onPointerCancel={pointer} /><div aria-label="Selected pixel magnifier" className="magnifier" title={selectedPixel?.hex} style={{ left: magnifiedPoint.x - magnifierSize / 2, top: magnifiedPoint.y - magnifierSize / 2, width: magnifierSize, height: magnifierSize, background: selectedPixel?.hex }} /></section><div className="controls"><label>Zoom <input aria-label="Zoom" type="range" min="1" max="8" step=".25" value={zoom} onChange={event => {
+      const nextZoom = clampZoom(+event.target.value)
+      setZoom(nextZoom)
+      setPan(current => constrainPan(current, nextZoom, image))
+    }} />{zoom.toFixed(2)}×</label><button onClick={() => analyse(point)}>Resample exact pixel</button></div></>}
     <p className="notice" role="status">{notice}</p>
     {analysis && active && <><section className="colour"><i style={{ background: active.colour.hex }} /><div><h2>{active.name}</h2><p data-testid="selected-colour">{active.colour.hex} · sRGB {active.colour.rgb.r}, {active.colour.rgb.g}, {active.colour.rgb.b}</p><p>XYZ {Object.values(active.colour.xyz).map(value => value.toFixed(1)).join(', ')} · Lab {Object.values(active.colour.lab).map(value => value.toFixed(1)).join(', ')}</p></div><label>Sample name <input aria-label="Sample name" value={sampleName} onChange={event => setSampleName(event.target.value)} /></label><button onClick={save}>Save sample</button></section><section><h2>Colour family</h2><div className="swatches">{analysis.tones.map(tone => <Swatch key={tone.name} tone={tone} selected={selectedTone === tone.name} onClick={() => selectTone(tone.name)} />)}</div></section><section className="mix-options" data-testid="alternative-mixes"><h2>Other mixes</h2><p>Compare the quick and closest-match recipes; each circle shows the paint and its amount.</p><RecipeCard recipe={analysis.recipes[selectedTone].simple} /><RecipeCard recipe={analysis.recipes[selectedTone].complex} /></section><section><h2>Check my mix</h2><p>Photograph a small, evenly lit dab and compare it with {active.name}.</p><label className="button secondary">Capture / import mix<input aria-label="Check my mix photo" type="file" accept="image/*" capture="environment" onChange={event => compare(event.target.files?.[0])} /></label></section></>}
     {samples.length > 0 && <section><h2>Saved samples ({samples.length})</h2>{samples.map(sample => <button key={sample.id} className="saved" onClick={() => selectSample(sample)}><i style={{ background: sample.colour.hex }} />{sample.name}</button>)}</section>}
