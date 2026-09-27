@@ -1,0 +1,17 @@
+{
+  "index.html": {
+    "file": "assets/index-D5Ll-jXt.js",
+    "name": "index",
+    "src": "index.html",
+    "isEntry": true,
+    "dynamicImports": [
+      "index.html"
+    ],
+    "css": [
+      "assets/index-B7l6sD_r.css"
+    ],
+    "assets": [
+      "assets/analyser.worker-C9Wnd_mx.js"
+    ]
+  }
+}
