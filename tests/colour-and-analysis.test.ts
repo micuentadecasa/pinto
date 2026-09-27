@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { deltaE2000, labToColour, rgbToColour } from '../src/lib/color'
-import { imageToScreen, makeToneFamily, sampleRegion, screenToImage } from '../src/lib/image-analysis'
+import { imageToScreen, makeToneFamily, samplePixel, sampleRegion, screenToImage } from '../src/lib/image-analysis'
 
 describe('image analysis', () => {
   it('maps display points to source pixels and back through the shared transform', () => {
@@ -8,6 +8,13 @@ describe('image analysis', () => {
     const image = { width: 500, height: 500 }
     expect(screenToImage({ x: 210, y: 110 }, viewport, image)).toEqual({ x: 100, y: 50 })
     expect(imageToScreen({ x: 100, y: 50 }, viewport, image)).toEqual({ x: 210, y: 110 })
+  })
+
+  it('reads the selected pixel exactly, without rounding it into an adjacent pixel', () => {
+    const data = new Uint8ClampedArray(3 * 2 * 4)
+    for (let index = 0; index < data.length; index += 4) data.set([220, 220, 220, 255], index)
+    data.set([12, 34, 56, 255], 4)
+    expect(samplePixel(data, 3, 2, { x: 1.75, y: .8 }).rgb).toEqual({ r: 12, g: 34, b: 56 })
   })
 
   it('samples a robust colour while rejecting bright luminance outlier', () => {

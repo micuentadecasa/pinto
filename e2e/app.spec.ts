@@ -32,17 +32,30 @@ test('generates ordered recipes and restores a stable source sample after reimpo
   expect(new Set(colours.map(colour => colour.join(','))).size).toBe(5)
   const recipes = page.locator('.recipe')
   await expect(recipes).toHaveCount(2)
+  await expect(page.getByTestId('used-colours')).toBeVisible()
+  await expect(page.getByTestId('used-colours').locator('.mix-paints li').first()).toBeVisible()
   for (const recipe of [recipes.nth(0), recipes.nth(1)]) {
-    const parts = await recipe.locator('span').allTextContents()
-    expect(parts.some(part => cataloguePaint.test(part))).toBe(true)
+    await expect(recipe.locator('.mix-paints i').first()).toBeVisible()
   }
   await tapCanvas(page, .25, .25)
   await expect(page.getByTestId('selected-colour')).toHaveText(/^#b4643c/)
+  await tapCanvas(page, .5, .405)
+  await expect(page.getByTestId('selected-colour')).toHaveText(/^#964b28/)
+  const magnifier = page.getByLabel('Selected pixel magnifier')
+  await expect(magnifier).toHaveCSS('background-color', 'rgb(150, 75, 40)')
+  const [imageBox, magnifierBox] = await Promise.all([page.getByLabel(/Reference image/).boundingBox(), magnifier.boundingBox()])
+  expect(imageBox).not.toBeNull()
+  expect(magnifierBox).not.toBeNull()
+  expect(magnifierBox!.width).toBeLessThanOrEqual(52)
+  expect(Math.abs(magnifierBox!.x + magnifierBox!.width / 2 - (imageBox!.x + imageBox!.width / 2))).toBeLessThan(2)
+  expect(Math.abs(magnifierBox!.y + magnifierBox!.height / 2 - (imageBox!.y + imageBox!.height * .405))).toBeLessThan(2)
   await page.getByLabel('Zoom').fill('2')
   await tapCanvas(page, .5, .2)
   await expect(page.getByTestId('selected-colour')).toHaveText(/^#cd8255/)
   await tapCanvas(page, .5, .5)
   await expect(page.getByTestId('selected-colour')).toHaveText(/^#b4643c/)
+  await expect(page.getByTestId('alternative-mixes')).toBeVisible()
+  await expect(page.getByTestId('alternative-mixes').locator('.mix-paints i').first()).toBeVisible()
   await page.getByRole('button', { name: 'Save sample' }).click()
   await expect(page.getByText(/Saved samples/)).toBeVisible()
   await expect(page.getByText(/Mix history/)).toBeVisible()
@@ -62,6 +75,27 @@ test('generates ordered recipes and restores a stable source sample after reimpo
   await expect(page.getByText(/Saved samples/)).toBeVisible()
   await expect(swatches).toHaveCount(5)
   await expect(recipes).toHaveCount(2)
+})
+
+test.describe('desktop layout', () => {
+  test.use({ viewport: { width: 1280, height: 900 }, isMobile: false, hasTouch: false })
+
+  test('keeps selected ingredients above the photo and alternative mixes below it', async ({ page }) => {
+    await page.goto('/')
+    await page.getByLabel('Choose reference photo').setInputFiles(tonalImage)
+    await expect(page.getByTestId('used-colours')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByTestId('alternative-mixes')).toBeVisible()
+    const [usedColours, image, alternatives] = await Promise.all([
+      page.getByTestId('used-colours').boundingBox(),
+      page.getByLabel(/Reference image/).boundingBox(),
+      page.getByTestId('alternative-mixes').boundingBox(),
+    ])
+    expect(usedColours).not.toBeNull()
+    expect(image).not.toBeNull()
+    expect(alternatives).not.toBeNull()
+    expect(usedColours!.y + usedColours!.height).toBeLessThanOrEqual(image!.y + 1)
+    expect(alternatives!.y).toBeGreaterThan(image!.y + image!.height)
+  })
 })
 
 test('does not publish a stale analysis after selecting another photo', async ({ page }) => {

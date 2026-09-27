@@ -21,6 +21,15 @@ export function imageToScreen(point: Point, viewport: Viewport, image: { width: 
   }
 }
 
+export function samplePixel(data: Uint8ClampedArray, width: number, height: number, point: Point): Colour {
+  const x = Math.floor(clamp(point.x, width))
+  const y = Math.floor(clamp(point.y, height))
+  const index = (y * width + x) * 4
+  return data[index + 3] >= 32
+    ? rgbToColour({ r: data[index], g: data[index + 1], b: data[index + 2] })
+    : rgbToColour({ r: 0, g: 0, b: 0 })
+}
+
 export function sampleRegion(data: Uint8ClampedArray, width: number, height: number, center: Point, size: number): Colour {
   const pixels: { rgb: RGB; l: number }[] = []
   const radius = Math.floor(size / 2)
