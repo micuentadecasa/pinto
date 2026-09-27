@@ -63,3 +63,67 @@ test('generates ordered recipes and restores a stable source sample after reimpo
   await expect(swatches).toHaveCount(5)
   await expect(recipes).toHaveCount(2)
 })
+
+test('does not publish a stale analysis after selecting another photo', async ({ page }) => {
+  await page.addInitScript(() => {
+    const NativeWorker = window.Worker
+    let requestCount = 0
+    let releaseDeferred = () => { throw new Error('No analysis was deferred') }
+    class DeferredWorker {
+      worker: Worker
+      deferred?: [unknown, Transferable[] | undefined]
+      onmessage: ((event: MessageEvent) => void) | null = null
+      constructor(scriptURL: string | URL, options?: WorkerOptions) {
+        this.worker = new NativeWorker(scriptURL, options)
+        this.worker.onmessage = event => this.onmessage?.(event)
+      }
+      postMessage(message: unknown, transfer?: Transferable[]) {
+        requestCount += 1
+        if (requestCount === 2) {
+          this.deferred = [message, transfer]
+          releaseDeferred = () => {
+            if (!this.deferred) throw new Error('No analysis was deferred')
+            this.worker.postMessage(...this.deferred)
+            this.deferred = undefined
+          }
+          return
+        }
+        this.worker.postMessage(message, transfer)
+      }
+      terminate() { this.worker.terminate() }
+    }
+    window.Worker = DeferredWorker as unknown as typeof Worker
+    ;(window as Window & { releaseDeferredAnalysis?: () => void }).releaseDeferredAnalysis = () => releaseDeferred()
+  })
+  await page.goto('/')
+  await page.getByLabel('Choose reference photo').setInputFiles(tonalImage)
+  await expect(page.locator('.swatch')).toHaveCount(5, { timeout: 15000 })
+  await tapCanvas(page, .25, .25)
+  await page.getByLabel('Choose reference photo').setInputFiles(otherImage)
+  await expect(page.getByRole('status')).toHaveText('Colour family and recipes ready.')
+  const currentColour = await page.getByTestId('selected-colour').textContent()
+  expect(currentColour).not.toBeNull()
+  expect(currentColour).not.toMatch(/^#b4643c/)
+  await page.evaluate(() => (window as Window & { releaseDeferredAnalysis?: () => void }).releaseDeferredAnalysis?.())
+  await page.waitForTimeout(500)
+  await expect(page.getByTestId('selected-colour')).toHaveText(currentColour!)
+})
+
+test('does not publish a stale comparison after selecting another tone', async ({ page }) => {
+  await page.addInitScript(() => {
+    const nativeCreateImageBitmap = window.createImageBitmap.bind(window)
+    let calls = 0
+    window.createImageBitmap = async (...arguments_: Parameters<typeof createImageBitmap>) => {
+      const bitmap = await nativeCreateImageBitmap(...arguments_)
+      if (++calls === 2) await new Promise(resolve => window.setTimeout(resolve, 500))
+      return bitmap
+    }
+  })
+  await page.goto('/')
+  await page.getByLabel('Choose reference photo').setInputFiles(tonalImage)
+  await expect(page.locator('.swatch')).toHaveCount(5, { timeout: 15000 })
+  await page.getByLabel('Check my mix photo').setInputFiles(otherImage)
+  await page.getByRole('button', { name: 'Highlight' }).click()
+  await page.waitForTimeout(750)
+  await expect(page.getByRole('status')).toHaveText('Colour family and recipes ready.')
+})

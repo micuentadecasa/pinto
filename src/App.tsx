@@ -76,8 +76,8 @@ export default function App() {
   const [settingsReady, setSettingsReady] = useState(false)
   const [notice, setNotice] = useState('Choose a reference photo to start.')
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const drag = useRef<Drag>()
-  const worker = useRef<Worker>()
+  const drag = useRef<Drag | undefined>(undefined)
+  const worker = useRef<Worker | undefined>(undefined)
   const generation = useRef(0)
 
   const analyse = (selectedPoint: Point, source = image, sampleSize = region) => {
@@ -193,7 +193,7 @@ export default function App() {
       setNotice('Image kept on this device. Tap the photo to sample.')
       analyse(selectedPoint, loaded)
     } catch {
-      setNotice('This image could not be decoded by this browser. Try JPEG, PNG, or WebP.')
+      if (fileGeneration === generation.current) setNotice('This image could not be decoded by this browser. Try JPEG, PNG, or WebP.')
     }
   }
 

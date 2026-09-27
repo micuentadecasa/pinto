@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deltaE2000, rgbToColour } from '../src/lib/color'
+import { deltaE2000, labToColour, rgbToColour } from '../src/lib/color'
 import { imageToScreen, makeToneFamily, sampleRegion, screenToImage } from '../src/lib/image-analysis'
 
 describe('image analysis', () => {
@@ -39,6 +39,21 @@ describe('image analysis', () => {
     expect(sparse.map(tone => tone.colour.lab.l)).toEqual([...sparse.map(tone => tone.colour.lab.l)].sort((a, b) => b - a))
     expect(sparse.filter(tone => tone.name !== 'Base').every(tone => tone.interpolated)).toBe(true)
     expect(new Set(sparse.map(tone => tone.colour.hex)).size).toBe(5)
+  })
+
+  it('interpolates strictly interior tones when contextual endpoints share lightness', () => {
+    const base = labToColour({ l: 50, a: 0, b: 0 })
+    const tones = makeToneFamily(base, [
+      labToColour({ l: 60, a: -18, b: 0 }),
+      labToColour({ l: 60, a: 18, b: 0 }),
+      labToColour({ l: 40, a: -18, b: 0 }),
+      labToColour({ l: 40, a: 18, b: 0 }),
+    ])
+    const lightness = tones.map(tone => tone.colour.lab.l)
+    expect(lightness).toEqual([...lightness].sort((a, b) => b - a))
+    for (let index = 0; index < lightness.length - 1; index++) expect(lightness[index]).toBeGreaterThan(lightness[index + 1])
+    expect(tones[1].interpolated).toBe(true)
+    expect(tones[3].interpolated).toBe(true)
   })
 
   it('has zero deltaE for the same colour', () => {

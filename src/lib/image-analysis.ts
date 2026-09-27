@@ -74,6 +74,15 @@ function nearestByLightness(colours: Colour[], target: number): Colour {
   return colours.reduce((best, colour) => Math.abs(colour.lab.l - target) < Math.abs(best.lab.l - target) ? colour : best)
 }
 
+function interiorTone(base: Colour, endpoint: Colour, candidates: Colour[]): { colour: Colour; interpolated?: boolean } {
+  const low = Math.min(base.lab.l, endpoint.lab.l)
+  const high = Math.max(base.lab.l, endpoint.lab.l)
+  const interior = candidates.filter(candidate => candidate.lab.l > low && candidate.lab.l < high)
+  return interior.length
+    ? { colour: nearestByLightness(interior, (base.lab.l + endpoint.lab.l) / 2) }
+    : { colour: interpolate(base, endpoint, .5), interpolated: true }
+}
+
 export function makeToneFamily(base: Colour, context: Colour[]): Tone[] {
   const clusters = clusterRelatedColours(base, context)
   const lights = clusters.filter(colour => colour.lab.l > base.lab.l + 2)
@@ -81,12 +90,8 @@ export function makeToneFamily(base: Colour, context: Colour[]): Tone[] {
   const brightest = lights.length ? lights.reduce((best, colour) => colour.lab.l > best.lab.l ? colour : best) : undefined
   const darkest = shadows.length ? shadows.reduce((best, colour) => colour.lab.l < best.lab.l ? colour : best) : undefined
   const highlight = brightest ? { colour: brightest } : { colour: extrapolate(base, 30), interpolated: true }
-  const light = lights.length > 1
-    ? { colour: nearestByLightness(lights, base.lab.l + (brightest!.lab.l - base.lab.l) / 2) }
-    : brightest ? { colour: interpolate(base, brightest, .5), interpolated: true } : { colour: extrapolate(base, 15), interpolated: true }
-  const shadow = shadows.length > 1
-    ? { colour: nearestByLightness(shadows, base.lab.l + (darkest!.lab.l - base.lab.l) / 2) }
-    : darkest ? { colour: interpolate(base, darkest, .5), interpolated: true } : { colour: extrapolate(base, -15), interpolated: true }
+  const light = brightest ? interiorTone(base, brightest, lights) : { colour: extrapolate(base, 15), interpolated: true }
+  const shadow = darkest ? interiorTone(base, darkest, shadows) : { colour: extrapolate(base, -15), interpolated: true }
   const deepShadow = darkest ? { colour: darkest } : { colour: extrapolate(base, -30), interpolated: true }
   return [
     { name: 'Highlight', ...highlight },
