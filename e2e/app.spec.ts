@@ -40,11 +40,22 @@ async function expectMixPresentation(page: Page, tone: string) {
   const selectedMixColour = usedColours.getByTestId('selected-mix-colour')
   await expect(selectedMixColour).toHaveText(/Selected colour#/)
   await expect(selectedMixColour.locator('i')).toBeVisible()
-  const [mixColourBackground, selectedColourBackground] = await Promise.all([
+  const [mixColourBackground, selectedToneBackground] = await Promise.all([
     selectedMixColour.locator('i').evaluate(element => getComputedStyle(element).backgroundColor),
-    page.locator('.colour > i').evaluate(element => getComputedStyle(element).backgroundColor),
+    page.locator('.swatch.selected i').evaluate(element => getComputedStyle(element).backgroundColor),
   ])
-  expect(mixColourBackground).toBe(selectedColourBackground)
+  expect(mixColourBackground).toBe(selectedToneBackground)
+  if (tone === 'Base') {
+    await expect(page.locator('.colour')).toBeVisible()
+    await expect(page.getByTestId('selected-colour')).toBeVisible()
+    await expect(page.getByLabel('Sample name')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Save sample' })).toBeVisible()
+  } else {
+    await expect(page.locator('.colour')).toHaveCount(0)
+    await expect(page.getByTestId('selected-colour')).toHaveCount(0)
+    await expect(page.getByLabel('Sample name')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Save sample' })).toHaveCount(0)
+  }
   await expectDescendingPaintPercentages(usedColours)
   const recipes = page.locator('.recipe')
   await expect(recipes).toHaveCount(2)
