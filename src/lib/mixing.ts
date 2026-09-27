@@ -52,15 +52,16 @@ function coarseSearch(target: Lab, model: MixingModel): Recipe {
 }
 
 function refine(target: Lab, coarse: Recipe, model: MixingModel): Recipe {
-  const paints = coarse.parts.map(part => part.paint)
-  const anchors = coarse.parts.map(part => part.parts * 5)
-  let best: Recipe | undefined
-  for (const amounts of compositions(paints.length, 20)) {
-    if (!amounts.every((amount, index) => Math.abs(amount - anchors[index]) <= 2)) continue
-    const candidate = recipeFor(target, { paints, amounts }, 20, 'Complex', model)
-    if (!best || candidate.deltaE < best.deltaE - 1e-9) best = candidate
+  let best: Recipe = { ...coarse, complexity: 'Complex' }
+  for (let count = 1; count <= 4; count++) {
+    for (const paints of groups([...CATALOGUE], count)) {
+      for (const amounts of compositions(count, 10)) {
+        const candidate = recipeFor(target, { paints, amounts }, 10, 'Complex', model)
+        if (candidate.deltaE < best.deltaE - 1e-9) best = candidate
+      }
+    }
   }
-  return best!
+  return best
 }
 
 export function optimizeRecipes(target: Lab, model: MixingModel = labMixingModel): { simple: Recipe; complex: Recipe } {
