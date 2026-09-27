@@ -40,19 +40,20 @@ describe('mixing and recovery', () => {
     const blob = new Blob(['pixels'], { type: 'image/png' })
     const colour = rgbToColour({ r: 1, g: 2, b: 3 })
     const recipes = optimizeRecipes(colour.lab)
-    await storage.saveLastImage({ id: 'last', blob, width: 5, height: 7, updatedAt: 1 })
+    await storage.saveLastImage({ id: 'image-a', blob, width: 5, height: 7, updatedAt: 1 })
+    await storage.saveLastImage({ id: 'image-b', blob, width: 7, height: 5, updatedAt: 2 })
     await storage.ensurePalette(CATALOGUE)
     await storage.ensurePalette([])
     await storage.saveSettings({ region: 41, zoom: 2 })
     await Promise.all([
-      storage.saveSample({ id: 'a', imageId: 'last', name: 'A', point: { x: .25, y: .5 }, colour, tones: [], recipes: {}, createdAt: 1 }),
-      storage.saveSample({ id: 'b', imageId: 'last', name: 'B', point: { x: .75, y: .5 }, colour, tones: [], recipes: {}, createdAt: 2 }),
+      storage.saveSample({ id: 'a', imageId: 'image-a', name: 'A', point: { x: .25, y: .5 }, colour, tones: [], recipes: {}, createdAt: 1 }),
+      storage.saveSample({ id: 'b', imageId: 'image-b', name: 'B', point: { x: .75, y: .5 }, colour, tones: [], recipes: {}, createdAt: 2 }),
     ])
-    await storage.saveMixHistory({ id: 'mix-a', imageId: 'last', sampleId: 'a', tone: 'Base', recipe: recipes, createdAt: 1 })
-    expect((await storage.getLastImage())?.width).toBe(5)
+    await storage.saveMixHistory({ id: 'mix-a', imageId: 'image-a', sampleId: 'a', tone: 'Base', recipe: recipes, createdAt: 1 })
+    expect((await storage.getLastImage())?.id).toBe('image-b')
     expect((await storage.getPalette())?.paints.map(paint => paint.code)).toEqual(CATALOGUE.map(paint => paint.code))
     expect(await storage.getSettings()).toEqual({ region: 41, zoom: 2 })
-    expect((await storage.getSamples()).map(sample => sample.id)).toEqual(expect.arrayContaining(['a', 'b']))
+    expect((await storage.getSamples()).map(sample => [sample.id, sample.imageId])).toEqual(expect.arrayContaining([['a', 'image-a'], ['b', 'image-b']]))
     expect((await storage.getMixHistory()).map(entry => entry.id)).toContain('mix-a')
   })
 })

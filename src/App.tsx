@@ -5,13 +5,13 @@ import { CATALOGUE, suggestAddition, type Recipe } from './lib/mixing'
 import { storage, type MixHistoryEntry, type SavedSample } from './lib/storage'
 
 type Analysis = { colour: Colour; tones: Tone[]; recipes: Record<string, { simple: Recipe; complex: Recipe }> }
-type Loaded = { url: string; blob: Blob; width: number; height: number; canvas: HTMLCanvasElement }
+type Loaded = { id: string; url: string; blob: Blob; width: number; height: number; canvas: HTMLCanvasElement }
 type Drag = { sourceStart: Point; pan: Point; moved: boolean }
 
 const sizes = [9, 21, 41, 81]
 const magnifierSize = 96
 
-async function normalise(file: Blob): Promise<Loaded> {
+async function normalise(file: Blob, id = crypto.randomUUID()): Promise<Loaded> {
   let source: CanvasImageSource
   let width: number
   let height: number
@@ -42,7 +42,7 @@ async function normalise(file: Blob): Promise<Loaded> {
   canvas.getContext('2d')!.drawImage(source, 0, 0, width, height)
   if ('close' in source) (source as ImageBitmap).close()
   const blob = await new Promise<Blob>(resolve => canvas.toBlob(value => resolve(value!), 'image/png'))
-  return { url: URL.createObjectURL(blob), blob, width, height, canvas }
+  return { id, url: URL.createObjectURL(blob), blob, width, height, canvas }
 }
 
 function Swatch({ tone, selected, onClick }: { tone: Tone; selected: boolean; onClick: () => void }) {
@@ -56,6 +56,7 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
 export default function App() {
   const [image, setImage] = useState<Loaded>()
   const [analysis, setAnalysis] = useState<Analysis>()
+  const [analysisImageId, setAnalysisImageId] = useState<string>()
   const [selectedTone, setSelectedTone] = useState('Base')
   const [region, setRegion] = useState(21)
   const [zoom, setZoom] = useState(1)
@@ -77,9 +78,11 @@ export default function App() {
   const analyse = (selectedPoint: Point, source = image, sampleSize = region) => {
     if (!source) return
     const id = ++generation.current
+    setAnalysis(undefined)
+    setAnalysisImageId(undefined)
     const data = source.canvas.getContext('2d')!.getImageData(0, 0, source.width, source.height).data
     setNotice('Analysing on this device…')
-    worker.current?.postMessage({ id, data, width: source.width, height: source.height, point: selectedPoint, size: sampleSize })
+    worker.current?.postMessage({ id, imageId: source.id, data, width: source.width, height: source.height, point: selectedPoint, size: sampleSize })
   }
 
   useEffect(() => {
@@ -87,6 +90,7 @@ export default function App() {
     worker.current.onmessage = event => {
       if (event.data.id !== generation.current) return
       setAnalysis(event.data)
+      setAnalysisImageId(event.data.imageId)
       setSelectedTone('Base')
       setNotice('Colour family and recipes ready.')
     }
@@ -101,7 +105,7 @@ export default function App() {
       if (settings?.zoom && settings.zoom >= 1 && settings.zoom <= 8) setZoom(settings.zoom)
       setSettingsReady(true)
       if (!saved) return
-      const loaded = await normalise(saved.blob)
+      const loaded = await normalise(saved.blob, saved.id)
       if (restoreGeneration !== generation.current) {
         URL.revokeObjectURL(loaded.url)
         return
@@ -132,21 +136,23 @@ export default function App() {
     context.translate(pan.x, pan.y)
     context.drawImage(image.canvas, 0, 0)
     context.restore()
-    const marker = imageToScreen(point, { left: 0, top: 0, displayWidth: canvas.width, displayHeight: canvas.height, zoom, pan }, image)
-    context.strokeStyle = 'white'
-    context.lineWidth = 3 / zoom
-    context.beginPath()
-    context.arc(marker.x, marker.y, 12 / zoom, 0, Math.PI * 2)
-    context.stroke()
-    context.strokeStyle = '#173a31'
-    context.lineWidth = 1 / zoom
-    context.beginPath()
-    context.moveTo(marker.x - 18 / zoom, marker.y)
-    context.lineTo(marker.x + 18 / zoom, marker.y)
-    context.moveTo(marker.x, marker.y - 18 / zoom)
-    context.lineTo(marker.x, marker.y + 18 / zoom)
-    context.stroke()
-  }, [image, pan, point, zoom])
+    if (analysisImageId === image.id) {
+      const marker = imageToScreen(point, { left: 0, top: 0, displayWidth: canvas.width, displayHeight: canvas.height, zoom, pan }, image)
+      context.strokeStyle = 'white'
+      context.lineWidth = 3 / zoom
+      context.beginPath()
+      context.arc(marker.x, marker.y, 12 / zoom, 0, Math.PI * 2)
+      context.stroke()
+      context.strokeStyle = '#173a31'
+      context.lineWidth = 1 / zoom
+      context.beginPath()
+      context.moveTo(marker.x - 18 / zoom, marker.y)
+      context.lineTo(marker.x + 18 / zoom, marker.y)
+      context.moveTo(marker.x, marker.y - 18 / zoom)
+      context.lineTo(marker.x, marker.y + 18 / zoom)
+      context.stroke()
+    }
+  }, [analysisImageId, image, pan, point, zoom])
 
   const chooseFile = async (file?: File) => {
     if (!file) return
@@ -155,13 +161,16 @@ export default function App() {
       return
     }
     const fileGeneration = ++generation.current
+    setAnalysis(undefined)
+    setAnalysisImageId(undefined)
     try {
-      const loaded = await normalise(file)
+      const imageId = crypto.randomUUID()
+      const loaded = await normalise(file, imageId)
       if (fileGeneration !== generation.current) {
         URL.revokeObjectURL(loaded.url)
         return
       }
-      await storage.saveLastImage({ id: 'last', blob: loaded.blob, width: loaded.width, height: loaded.height, updatedAt: Date.now() })
+      await storage.saveLastImage({ id: loaded.id, blob: loaded.blob, width: loaded.width, height: loaded.height, updatedAt: Date.now() })
       if (fileGeneration !== generation.current) {
         URL.revokeObjectURL(loaded.url)
         return
@@ -232,10 +241,14 @@ export default function App() {
   const active = analysis?.tones.find(tone => tone.name === selectedTone) ?? analysis?.tones[2]
   const save = async () => {
     if (!analysis || !image || !active) return
-    const sample: SavedSample = {
-      id: crypto.randomUUID(), imageId: 'last', name: sampleName.trim() || `Sample ${samples.length + 1}`, point: { x: point.x / image.width, y: point.y / image.height }, colour: analysis.colour, tones: analysis.tones, recipes: analysis.recipes, createdAt: Date.now(),
+    if (analysisImageId !== image.id) {
+      setNotice('Reimport this sample’s source image to save or inspect its location.')
+      return
     }
-    const entry: MixHistoryEntry = { id: crypto.randomUUID(), imageId: 'last', sampleId: sample.id, tone: active.name, recipe: analysis.recipes[active.name], createdAt: sample.createdAt }
+    const sample: SavedSample = {
+      id: crypto.randomUUID(), imageId: image.id, name: sampleName.trim() || `Sample ${samples.length + 1}`, point: { x: point.x / image.width, y: point.y / image.height }, colour: analysis.colour, tones: analysis.tones, recipes: analysis.recipes, createdAt: Date.now(),
+    }
+    const entry: MixHistoryEntry = { id: crypto.randomUUID(), imageId: image.id, sampleId: sample.id, tone: active.name, recipe: analysis.recipes[active.name], createdAt: sample.createdAt }
     await Promise.all([storage.saveSample(sample), storage.saveMixHistory(entry)])
     setSamples(current => [...current, sample])
     setSampleName('')
@@ -260,15 +273,29 @@ export default function App() {
     }
   }
 
+  const selectSample = (sample: SavedSample) => {
+    setAnalysis({ colour: sample.colour, tones: sample.tones, recipes: sample.recipes })
+    setAnalysisImageId(sample.imageId)
+    setSelectedTone('Base')
+    if (image?.id === sample.imageId) {
+      const samplePoint = { x: sample.point.x * image.width, y: sample.point.y * image.height }
+      setPoint(samplePoint)
+      setMagnifierPoint(samplePoint)
+      setNotice('Saved sample restored on its source image.')
+    } else {
+      setNotice('Saved result loaded. Reimport its source image to inspect its location.')
+    }
+  }
+  const showingSampleLocation = !!image && (!analysis || analysisImageId === image.id)
   const magnifiedPoint = image ? imageToScreen(magnifierPoint, { left: 0, top: 0, displayWidth: display.width, displayHeight: display.height, zoom, pan }, image) : { x: 0, y: 0 }
 
   return <main>
     <header><div><h1>Pinto</h1><p>Van Gogh basic oils mixer</p></div><strong className="private">🔒 Photos never leave this device</strong></header>
     <section className="intro"><h2>Match a colour from a photo</h2><p>Recipe estimates use photographed colour in CIELAB, not a physical pigment calibration.</p><div className="actions"><label className="button">Camera<input aria-label="Take reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={event => chooseFile(event.target.files?.[0])} /></label><label className="button secondary">Choose photo<input aria-label="Choose reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={event => chooseFile(event.target.files?.[0])} /></label></div></section>
-    {image && <><section className="viewer"><canvas aria-label="Reference image. Tap to select colour; drag to pan." ref={canvasRef} width={image.width} height={image.height} onPointerDown={pointer} onPointerMove={pointer} onPointerUp={pointer} onPointerCancel={pointer} /><div aria-label="5× magnifier" className="magnifier" style={{ left: magnifier.x, top: magnifier.y, width: magnifier.size, height: magnifier.size, lineHeight: `${magnifier.size - 6}px`, backgroundImage: `url(${image.url})`, backgroundSize: `${display.width * zoom * 5}px ${display.height * zoom * 5}px`, backgroundPosition: `${magnifier.size / 2 - magnifiedPoint.x * 5}px ${magnifier.size / 2 - magnifiedPoint.y * 5}px` }}>+</div></section><div className="controls"><label>Zoom <input aria-label="Zoom" type="range" min="1" max="8" step=".25" value={zoom} onChange={event => setZoom(+event.target.value)} />{zoom.toFixed(2)}×</label><label>Sample area <select value={region} onChange={event => setRegion(+event.target.value)}>{sizes.map(size => <option key={size} value={size}>{size}×{size}</option>)}</select></label><button onClick={() => analyse(point)}>Resample</button></div></>}
+    {image && <><section className="viewer"><canvas aria-label={showingSampleLocation ? 'Reference image. Tap to select colour; drag to pan.' : 'Reference image. Saved sample location unavailable; reimport its source image.'} ref={canvasRef} width={image.width} height={image.height} onPointerDown={pointer} onPointerMove={pointer} onPointerUp={pointer} onPointerCancel={pointer} /><div aria-label="5× magnifier" className="magnifier" style={{ left: magnifier.x, top: magnifier.y, width: magnifier.size, height: magnifier.size, lineHeight: `${magnifier.size - 6}px`, backgroundImage: `url(${image.url})`, backgroundSize: `${display.width * zoom * 5}px ${display.height * zoom * 5}px`, backgroundPosition: `${magnifier.size / 2 - magnifiedPoint.x * 5}px ${magnifier.size / 2 - magnifiedPoint.y * 5}px` }}>+</div></section><div className="controls"><label>Zoom <input aria-label="Zoom" type="range" min="1" max="8" step=".25" value={zoom} onChange={event => setZoom(+event.target.value)} />{zoom.toFixed(2)}×</label><label>Sample area <select value={region} onChange={event => setRegion(+event.target.value)}>{sizes.map(size => <option key={size} value={size}>{size}×{size}</option>)}</select></label><button onClick={() => analyse(point)}>Resample</button></div></>}
     <p className="notice" role="status">{notice}</p>
     {analysis && active && <><section className="colour"><i style={{ background: active.colour.hex }} /><div><h2>{active.name}</h2><p data-testid="selected-colour">{active.colour.hex} · sRGB {active.colour.rgb.r}, {active.colour.rgb.g}, {active.colour.rgb.b}</p><p>XYZ {Object.values(active.colour.xyz).map(value => value.toFixed(1)).join(', ')} · Lab {Object.values(active.colour.lab).map(value => value.toFixed(1)).join(', ')}</p></div><label>Sample name <input aria-label="Sample name" value={sampleName} onChange={event => setSampleName(event.target.value)} /></label><button onClick={save}>Save sample</button></section><section><h2>Colour family</h2><div className="swatches">{analysis.tones.map(tone => <Swatch key={tone.name} tone={tone} selected={selectedTone === tone.name} onClick={() => setSelectedTone(tone.name)} />)}</div></section><section><h2>Mix recipes</h2><RecipeCard recipe={analysis.recipes[selectedTone].simple} /><RecipeCard recipe={analysis.recipes[selectedTone].complex} /></section><section><h2>Check my mix</h2><p>Photograph a small, evenly lit dab and compare it with {active.name}.</p><label className="button secondary">Capture / import mix<input aria-label="Check my mix photo" type="file" accept="image/*" capture="environment" onChange={event => compare(event.target.files?.[0])} /></label></section></>}
-    {samples.length > 0 && <section><h2>Saved samples ({samples.length})</h2>{samples.map(sample => <button key={sample.id} className="saved" onClick={() => { setAnalysis({ colour: sample.colour, tones: sample.tones, recipes: sample.recipes }); setSelectedTone('Base') }}><i style={{ background: sample.colour.hex }} />{sample.name}</button>)}</section>}
+    {samples.length > 0 && <section><h2>Saved samples ({samples.length})</h2>{samples.map(sample => <button key={sample.id} className="saved" onClick={() => selectSample(sample)}><i style={{ background: sample.colour.hex }} />{sample.name}</button>)}</section>}
     {history.length > 0 && <section><h2>Mix history ({history.length})</h2>{history.map(entry => <p key={entry.id}>{entry.tone}: {entry.recipe.complex.parts.map(part => part.paint.code).join(', ')}</p>)}</section>}
     <footer>Fixed catalogue: 105, 268, 270, 393, 366, 504, 535, 619, 409, 701.</footer>
   </main>

@@ -2,10 +2,10 @@ import type { Colour } from './color'
 import type { Tone } from './image-analysis'
 import type { Paint, Recipe } from './mixing'
 
-export type StoredImage = { id: 'last'; blob: Blob; width: number; height: number; updatedAt: number }
-export type SavedSample = { id: string; imageId: 'last'; name: string; point: { x: number; y: number }; colour: Colour; tones: Tone[]; recipes: Record<string, { simple: Recipe; complex: Recipe }>; createdAt: number }
+export type StoredImage = { id: string; blob: Blob; width: number; height: number; updatedAt: number }
+export type SavedSample = { id: string; imageId: string; name: string; point: { x: number; y: number }; colour: Colour; tones: Tone[]; recipes: Record<string, { simple: Recipe; complex: Recipe }>; createdAt: number }
 export type PaletteSnapshot = { id: 'fixed'; paints: Paint[]; savedAt: number }
-export type MixHistoryEntry = { id: string; imageId: 'last'; sampleId: string; tone: Tone['name']; recipe: { simple: Recipe; complex: Recipe }; createdAt: number }
+export type MixHistoryEntry = { id: string; imageId: string; sampleId: string; tone: Tone['name']; recipe: { simple: Recipe; complex: Recipe }; createdAt: number }
 export type Settings = { region?: number; zoom?: number }
 
 const DB = 'pinto-v1'
