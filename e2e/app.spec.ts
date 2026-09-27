@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 const tonalImage = 'e2e/assets/tones.png'
 const otherImage = 'e2e/assets/other.png'
@@ -14,14 +14,54 @@ function labLightness([red, green, blue]: number[]) {
 }
 
 async function tapCanvas(page: Page, xFraction: number, yFraction: number) {
-  const box = await page.getByLabel(/Reference image/).boundingBox()
+  const canvas = page.getByLabel(/Reference image/)
+  const box = await canvas.boundingBox()
   if (!box) throw new Error('Reference image is not visible')
-  await page.mouse.click(box.x + box.width * xFraction, box.y + box.height * yFraction)
+  await canvas.click({ position: { x: box.width * xFraction, y: box.height * yFraction } })
+}
+
+async function expectDescendingPaintPercentages(container: Locator) {
+  const percentages = await container.locator('.mix-paints li').evaluateAll(items => items.map(item => Number(item.getAttribute('data-percent'))))
+  expect(percentages).toEqual([...percentages].sort((first, second) => second - first))
+}
+
+async function selectTone(page: Page, tone: string) {
+  await page.getByRole('button', { name: new RegExp(`^${tone}\\b`) }).click()
+}
+
+async function expectMixPresentation(page: Page, tone: string) {
+  const usedColours = page.getByTestId('used-colours')
+  await expect(usedColours).toBeVisible()
+  await expect(usedColours.locator('.used-colours-summary > div:first-child > p')).toHaveText(`${tone} · closest match`)
+  const selectedMixColour = usedColours.getByTestId('selected-mix-colour')
+  await expect(selectedMixColour).toHaveText(/Selected colour#/)
+  await expect(selectedMixColour.locator('i')).toBeVisible()
+  const [mixColourBackground, selectedColourBackground] = await Promise.all([
+    selectedMixColour.locator('i').evaluate(element => getComputedStyle(element).backgroundColor),
+    page.locator('.colour > i').evaluate(element => getComputedStyle(element).backgroundColor),
+  ])
+  expect(mixColourBackground).toBe(selectedColourBackground)
+  await expectDescendingPaintPercentages(usedColours)
+  const recipes = page.locator('.recipe')
+  await expect(recipes).toHaveCount(2)
+  for (const recipe of [recipes.nth(0), recipes.nth(1)]) {
+    await expect(recipe.locator('.mix-paints i').first()).toBeVisible()
+    await expect(recipe.getByTestId('selected-mix-colour')).toHaveText(/Mix colour#/)
+    await expect(recipe.getByTestId('selected-mix-colour').locator('i')).toBeVisible()
+    await expectDescendingPaintPercentages(recipe)
+  }
 }
 
 test('generates ordered recipes and restores a stable source sample after reimport', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByText('Photos never leave this device')).toBeVisible()
+  await expect(page.getByText('Van Gogh basic oils mixer')).toHaveCount(0)
+  const camera = page.locator('.app-header .button')
+  await expect(camera).toHaveText('Camera')
+  const [cameraBox, introBox] = await Promise.all([camera.boundingBox(), page.locator('.intro').boundingBox()])
+  expect(cameraBox).not.toBeNull()
+  expect(introBox).not.toBeNull()
+  expect(cameraBox!.y).toBeLessThan(introBox!.y)
   await page.getByLabel('Choose reference photo').setInputFiles(tonalImage)
   const swatches = page.locator('.swatch')
   await expect(swatches).toHaveCount(5, { timeout: 15000 })
@@ -31,11 +71,15 @@ test('generates ordered recipes and restores a stable source sample after reimpo
   for (let index = 0; index < lightness.length - 1; index++) expect(lightness[index]).toBeGreaterThan(lightness[index + 1])
   expect(new Set(colours.map(colour => colour.join(','))).size).toBe(5)
   const recipes = page.locator('.recipe')
-  await expect(recipes).toHaveCount(2)
-  await expect(page.getByTestId('used-colours')).toBeVisible()
-  await expect(page.getByTestId('used-colours').locator('.mix-paints li').first()).toBeVisible()
-  for (const recipe of [recipes.nth(0), recipes.nth(1)]) {
-    await expect(recipe.locator('.mix-paints i').first()).toBeVisible()
+  const usedColours = page.getByTestId('used-colours')
+  await expectMixPresentation(page, 'Base')
+  await expect(usedColours.locator('.mix-paints li').first()).toBeVisible()
+  const usedCircleDiameters = await usedColours.locator('.mix-paints i').evaluateAll(items => items.map(item => item.getBoundingClientRect().width))
+  expect(usedCircleDiameters.every(diameter => diameter >= 28 && diameter <= 72)).toBe(true)
+  await expect(usedColours.locator('.mix-paints li[data-percent="10"] i')).toHaveCSS('width', '28px')
+  for (const tone of ['Highlight', 'Light', 'Base', 'Shadow', 'Deep Shadow']) {
+    await selectTone(page, tone)
+    await expectMixPresentation(page, tone)
   }
   await tapCanvas(page, .25, .25)
   await expect(page.getByTestId('selected-colour')).toHaveText(/^#b4643c/)
@@ -85,6 +129,9 @@ test.describe('desktop layout', () => {
     await page.getByLabel('Choose reference photo').setInputFiles(tonalImage)
     await expect(page.getByTestId('used-colours')).toBeVisible({ timeout: 15000 })
     await expect(page.getByTestId('alternative-mixes')).toBeVisible()
+    await expectMixPresentation(page, 'Base')
+    await selectTone(page, 'Shadow')
+    await expectMixPresentation(page, 'Shadow')
     const [usedColours, image, alternatives] = await Promise.all([
       page.getByTestId('used-colours').boundingBox(),
       page.getByLabel(/Reference image/).boundingBox(),

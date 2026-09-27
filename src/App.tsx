@@ -53,12 +53,27 @@ function Swatch({ tone, selected, onClick }: { tone: Tone; selected: boolean; on
   return <button className={`swatch ${selected ? 'selected' : ''}`} onClick={onClick}><i style={{ background: tone.colour.hex }} /><span>{tone.name}</span><small>{tone.interpolated ? 'estimated ' : ''}{tone.colour.hex}</small></button>
 }
 
+export function mixCircleDiameter(percent: number) {
+  return Math.round(Math.max(28, Math.min(72, 28 * Math.sqrt(percent / 10))))
+}
+
+function orderedMixParts(recipe: Recipe) {
+  return [...recipe.parts].sort((first, second) => second.percent - first.percent)
+}
+
+function SelectedMixColour({ colour, label = 'Selected colour' }: { colour: Colour; label?: string }) {
+  return <div className="selected-mix-colour" data-testid="selected-mix-colour">
+    <i aria-hidden="true" style={{ background: colour.hex }} />
+    <div><b>{label}</b><small>{colour.hex}</small></div>
+  </div>
+}
+
 function PaintCircles({ recipe }: { recipe: Recipe }) {
   return <ul className="mix-paints" aria-label={`${recipe.complexity} mix colours`}>
-    {recipe.parts.map(part => {
-      const diameter = Math.max(28, Math.min(96, part.percent * 1.6))
+    {orderedMixParts(recipe).map(part => {
+      const diameter = mixCircleDiameter(part.percent)
       const labelWidth = Math.max(72, diameter)
-      return <li key={part.paint.code} style={{ width: labelWidth }}>
+      return <li key={part.paint.code} data-percent={part.percent} style={{ width: labelWidth }}>
         <i aria-hidden="true" style={{ width: diameter, height: diameter, background: part.paint.colour.hex }} />
         <span>{part.paint.name}</span>
         <small>{part.percent}% · {part.parts} part{part.parts === 1 ? '' : 's'}</small>
@@ -68,7 +83,7 @@ function PaintCircles({ recipe }: { recipe: Recipe }) {
 }
 
 function RecipeCard({ recipe }: { recipe: Recipe }) {
-  return <article className="recipe"><div><b>{recipe.complexity} mix</b><small>ΔE {recipe.deltaE.toFixed(1)}</small></div><PaintCircles recipe={recipe} /></article>
+  return <article className="recipe"><div className="recipe-summary"><div><b>{recipe.complexity} mix</b><small>ΔE {recipe.deltaE.toFixed(1)}</small></div><SelectedMixColour colour={recipe.colour} label="Mix colour" /></div><PaintCircles recipe={recipe} /></article>
 }
 
 export default function App() {
@@ -279,14 +294,14 @@ export default function App() {
   const primaryRecipe = analysis && active ? analysis.recipes[selectedTone].complex : undefined
 
   return <main>
-    <header className="app-header"><div><h1>Pinto</h1><p>Van Gogh basic oils mixer</p></div><strong className="private">🔒 Photos never leave this device</strong></header>
-    <section className="intro"><h2>Match a colour from a photo</h2><p>Tap one exact pixel to get a paint-mix estimate.</p><div className="actions"><label className="button">Camera<input aria-label="Take reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={event => chooseFile(event.target.files?.[0])} /></label><label className="button secondary">Choose photo<input aria-label="Choose reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={event => chooseFile(event.target.files?.[0])} /></label></div></section>
-    {image && primaryRecipe && <section className="used-colours" data-testid="used-colours" aria-labelledby="used-colours-heading"><div><h2 id="used-colours-heading">Colours in the selected mix</h2><p>{active?.name} · closest match</p></div><PaintCircles recipe={primaryRecipe} /></section>}
+    <header className="app-header"><h1>Pinto</h1><div className="header-actions"><label className="button">Camera<input aria-label="Take reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={event => chooseFile(event.target.files?.[0])} /></label><strong className="private">🔒 Photos never leave this device</strong></div></header>
+    <section className="intro"><h2>Match a colour from a photo</h2><p>Tap one exact pixel to get a paint-mix estimate.</p><div className="actions"><label className="button secondary">Choose photo<input aria-label="Choose reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={event => chooseFile(event.target.files?.[0])} /></label></div></section>
+    {image && active && primaryRecipe && <section className="used-colours" data-testid="used-colours" aria-labelledby="used-colours-heading"><div className="used-colours-summary"><div><h2 id="used-colours-heading">Colours in the selected mix</h2><p>{active?.name} · closest match</p></div><SelectedMixColour colour={active.colour} /></div><p className="ingredient-label">Paint ingredients</p><PaintCircles recipe={primaryRecipe} /></section>}
     {image && <><section className="viewer"><canvas aria-label={showingSampleLocation ? 'Reference image. Tap to select colour; drag to pan.' : 'Reference image. Saved sample location unavailable; reimport its source image.'} ref={canvasRef} width={image.width} height={image.height} onPointerDown={pointer} onPointerMove={pointer} onPointerUp={pointer} onPointerCancel={pointer} /><div aria-label="Selected pixel magnifier" className="magnifier" title={selectedPixel?.hex} style={{ left: magnifiedPoint.x - magnifierSize / 2, top: magnifiedPoint.y - magnifierSize / 2, width: magnifierSize, height: magnifierSize, background: selectedPixel?.hex }} /></section><div className="controls"><label>Zoom <input aria-label="Zoom" type="range" min="1" max="8" step=".25" value={zoom} onChange={event => setZoom(+event.target.value)} />{zoom.toFixed(2)}×</label><button onClick={() => analyse(point)}>Resample exact pixel</button></div></>}
     <p className="notice" role="status">{notice}</p>
     {analysis && active && <><section className="colour"><i style={{ background: active.colour.hex }} /><div><h2>{active.name}</h2><p data-testid="selected-colour">{active.colour.hex} · sRGB {active.colour.rgb.r}, {active.colour.rgb.g}, {active.colour.rgb.b}</p><p>XYZ {Object.values(active.colour.xyz).map(value => value.toFixed(1)).join(', ')} · Lab {Object.values(active.colour.lab).map(value => value.toFixed(1)).join(', ')}</p></div><label>Sample name <input aria-label="Sample name" value={sampleName} onChange={event => setSampleName(event.target.value)} /></label><button onClick={save}>Save sample</button></section><section><h2>Colour family</h2><div className="swatches">{analysis.tones.map(tone => <Swatch key={tone.name} tone={tone} selected={selectedTone === tone.name} onClick={() => selectTone(tone.name)} />)}</div></section><section className="mix-options" data-testid="alternative-mixes"><h2>Other mixes</h2><p>Compare the quick and closest-match recipes; each circle shows the paint and its amount.</p><RecipeCard recipe={analysis.recipes[selectedTone].simple} /><RecipeCard recipe={analysis.recipes[selectedTone].complex} /></section><section><h2>Check my mix</h2><p>Photograph a small, evenly lit dab and compare it with {active.name}.</p><label className="button secondary">Capture / import mix<input aria-label="Check my mix photo" type="file" accept="image/*" capture="environment" onChange={event => compare(event.target.files?.[0])} /></label></section></>}
     {samples.length > 0 && <section><h2>Saved samples ({samples.length})</h2>{samples.map(sample => <button key={sample.id} className="saved" onClick={() => selectSample(sample)}><i style={{ background: sample.colour.hex }} />{sample.name}</button>)}</section>}
-    {history.length > 0 && <section><h2>Mix history ({history.length})</h2>{history.map(entry => <p key={entry.id}>{entry.tone}: {entry.recipe.complex.parts.map(part => part.paint.code).join(', ')}</p>)}</section>}
+    {history.length > 0 && <section><h2>Mix history ({history.length})</h2>{history.map(entry => <p key={entry.id}>{entry.tone}: {orderedMixParts(entry.recipe.complex).map(part => part.paint.code).join(', ')}</p>)}</section>}
     <footer>Fixed catalogue: 105, 268, 270, 393, 366, 504, 535, 619, 409, 701.</footer>
   </main>
 }

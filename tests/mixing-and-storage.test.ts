@@ -2,8 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { labToColour, rgbToColour } from '../src/lib/color'
 import { CATALOGUE, optimizeRecipes, suggestAddition, type MixingModel } from '../src/lib/mixing'
 import { storage } from '../src/lib/storage'
+import { mixCircleDiameter } from '../src/App'
 
 describe('mixing and recovery', () => {
+  it('keeps 10% mix circles legible while bounding larger percentages', () => {
+    expect(mixCircleDiameter(10)).toBe(28)
+    expect(mixCircleDiameter(60)).toBe(69)
+    expect(mixCircleDiameter(60)).toBeLessThan(96)
+    expect(mixCircleDiameter(100)).toBe(72)
+  })
+
   it('deterministically searches the complete fine grid without leaving the fixed catalogue', () => {
     const target = rgbToColour({ r: 110, g: 80, b: 60 }).lab
     const first = optimizeRecipes(target)
