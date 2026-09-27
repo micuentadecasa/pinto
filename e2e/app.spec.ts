@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 const tonalImage = 'e2e/assets/tones.png'
+const otherImage = 'e2e/assets/other.png'
 const cataloguePaint = /\b(105|268|270|393|366|504|535|619|409|701)\b.*:\s*(?:[1-9]\d?|100)%/
 
 function labLightness([red, green, blue]: number[]) {
@@ -18,7 +19,7 @@ async function tapCanvas(page: Page, xFraction: number, yFraction: number) {
   await page.mouse.click(box.x + box.width * xFraction, box.y + box.height * yFraction)
 }
 
-test('generates ordered populated recipes and preserves a source sample across zoom', async ({ page }) => {
+test('generates ordered recipes and restores a stable source sample after reimport', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByText('Photos never leave this device')).toBeVisible()
   await page.getByLabel('Choose reference photo').setInputFiles(tonalImage)
@@ -45,12 +46,17 @@ test('generates ordered populated recipes and preserves a source sample across z
   await page.getByRole('button', { name: 'Save sample' }).click()
   await expect(page.getByText(/Saved samples/)).toBeVisible()
   await expect(page.getByText(/Mix history/)).toBeVisible()
-  await page.getByLabel('Choose reference photo').setInputFiles(tonalImage)
+  await page.getByLabel('Choose reference photo').setInputFiles(otherImage)
   await expect(page.getByRole('status')).toHaveText('Colour family and recipes ready.')
   await expect(swatches).toHaveCount(5)
   await page.getByRole('button', { name: 'Sample 1' }).click()
   await expect(page.getByText('Saved result loaded. Reimport its source image to inspect its location.')).toBeVisible()
   await expect(page.getByLabel(/Saved sample location unavailable/)).toBeVisible()
+  await page.getByLabel('Choose reference photo').setInputFiles(tonalImage)
+  await expect(page.getByRole('status')).toHaveText('Colour family and recipes ready.')
+  await page.getByRole('button', { name: 'Sample 1' }).click()
+  await expect(page.getByText('Saved sample restored on its source image.')).toBeVisible()
+  await expect(page.getByLabel('Reference image. Tap to select colour; drag to pan.')).toBeVisible()
   await page.reload()
   await expect(page.getByLabel(/Reference image/)).toBeVisible()
   await expect(page.getByText(/Saved samples/)).toBeVisible()

@@ -11,7 +11,12 @@ type Drag = { sourceStart: Point; pan: Point; moved: boolean }
 const sizes = [9, 21, 41, 81]
 const magnifierSize = 96
 
-async function normalise(file: Blob, id = crypto.randomUUID()): Promise<Loaded> {
+async function sourceId(file: Blob): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
+  return `image-${[...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
+async function normalise(file: Blob, id = ''): Promise<Loaded> {
   let source: CanvasImageSource
   let width: number
   let height: number
@@ -164,7 +169,8 @@ export default function App() {
     setAnalysis(undefined)
     setAnalysisImageId(undefined)
     try {
-      const imageId = crypto.randomUUID()
+      const imageId = await sourceId(file)
+      if (fileGeneration !== generation.current) return
       const loaded = await normalise(file, imageId)
       if (fileGeneration !== generation.current) {
         URL.revokeObjectURL(loaded.url)
@@ -258,22 +264,29 @@ export default function App() {
 
   const compare = async (file?: File) => {
     if (!file || !active) return
+    const comparisonGeneration = ++generation.current
+    const target = active
     try {
       const check = await normalise(file)
       const pixels = check.canvas.getContext('2d')!.getImageData(0, 0, check.width, check.height)
       const { deltaE2000 } = await import('./lib/color')
       const mixed = sampleRegion(pixels.data, check.width, check.height, { x: check.width / 2, y: check.height / 2 }, 81)
-      const comparison = direction(active.colour.lab, mixed.lab)
-      const suggestion = suggestAddition(active.colour.lab, mixed)
+      const comparison = direction(target.colour.lab, mixed.lab)
+      const suggestion = suggestAddition(target.colour.lab, mixed)
       const advice = suggestion ? ` Try a small addition of ${suggestion.paint.code} ${suggestion.paint.name}.` : ' No available paint addition improves this estimate.'
-      setNotice(`Mix check ΔE ${deltaE2000(active.colour.lab, mixed.lab).toFixed(1)}: ${comparison.words.join(', ')}.${advice}`)
+      if (comparisonGeneration === generation.current) setNotice(`Mix check ΔE ${deltaE2000(target.colour.lab, mixed.lab).toFixed(1)}: ${comparison.words.join(', ')}.${advice}`)
       URL.revokeObjectURL(check.url)
     } catch {
-      setNotice('Could not analyse that comparison photo.')
+      if (comparisonGeneration === generation.current) setNotice('Could not analyse that comparison photo.')
     }
   }
 
+  const selectTone = (tone: Tone['name']) => {
+    ++generation.current
+    setSelectedTone(tone)
+  }
   const selectSample = (sample: SavedSample) => {
+    ++generation.current
     setAnalysis({ colour: sample.colour, tones: sample.tones, recipes: sample.recipes })
     setAnalysisImageId(sample.imageId)
     setSelectedTone('Base')
@@ -294,7 +307,7 @@ export default function App() {
     <section className="intro"><h2>Match a colour from a photo</h2><p>Recipe estimates use photographed colour in CIELAB, not a physical pigment calibration.</p><div className="actions"><label className="button">Camera<input aria-label="Take reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={event => chooseFile(event.target.files?.[0])} /></label><label className="button secondary">Choose photo<input aria-label="Choose reference photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={event => chooseFile(event.target.files?.[0])} /></label></div></section>
     {image && <><section className="viewer"><canvas aria-label={showingSampleLocation ? 'Reference image. Tap to select colour; drag to pan.' : 'Reference image. Saved sample location unavailable; reimport its source image.'} ref={canvasRef} width={image.width} height={image.height} onPointerDown={pointer} onPointerMove={pointer} onPointerUp={pointer} onPointerCancel={pointer} /><div aria-label="5× magnifier" className="magnifier" style={{ left: magnifier.x, top: magnifier.y, width: magnifier.size, height: magnifier.size, lineHeight: `${magnifier.size - 6}px`, backgroundImage: `url(${image.url})`, backgroundSize: `${display.width * zoom * 5}px ${display.height * zoom * 5}px`, backgroundPosition: `${magnifier.size / 2 - magnifiedPoint.x * 5}px ${magnifier.size / 2 - magnifiedPoint.y * 5}px` }}>+</div></section><div className="controls"><label>Zoom <input aria-label="Zoom" type="range" min="1" max="8" step=".25" value={zoom} onChange={event => setZoom(+event.target.value)} />{zoom.toFixed(2)}×</label><label>Sample area <select value={region} onChange={event => setRegion(+event.target.value)}>{sizes.map(size => <option key={size} value={size}>{size}×{size}</option>)}</select></label><button onClick={() => analyse(point)}>Resample</button></div></>}
     <p className="notice" role="status">{notice}</p>
-    {analysis && active && <><section className="colour"><i style={{ background: active.colour.hex }} /><div><h2>{active.name}</h2><p data-testid="selected-colour">{active.colour.hex} · sRGB {active.colour.rgb.r}, {active.colour.rgb.g}, {active.colour.rgb.b}</p><p>XYZ {Object.values(active.colour.xyz).map(value => value.toFixed(1)).join(', ')} · Lab {Object.values(active.colour.lab).map(value => value.toFixed(1)).join(', ')}</p></div><label>Sample name <input aria-label="Sample name" value={sampleName} onChange={event => setSampleName(event.target.value)} /></label><button onClick={save}>Save sample</button></section><section><h2>Colour family</h2><div className="swatches">{analysis.tones.map(tone => <Swatch key={tone.name} tone={tone} selected={selectedTone === tone.name} onClick={() => setSelectedTone(tone.name)} />)}</div></section><section><h2>Mix recipes</h2><RecipeCard recipe={analysis.recipes[selectedTone].simple} /><RecipeCard recipe={analysis.recipes[selectedTone].complex} /></section><section><h2>Check my mix</h2><p>Photograph a small, evenly lit dab and compare it with {active.name}.</p><label className="button secondary">Capture / import mix<input aria-label="Check my mix photo" type="file" accept="image/*" capture="environment" onChange={event => compare(event.target.files?.[0])} /></label></section></>}
+    {analysis && active && <><section className="colour"><i style={{ background: active.colour.hex }} /><div><h2>{active.name}</h2><p data-testid="selected-colour">{active.colour.hex} · sRGB {active.colour.rgb.r}, {active.colour.rgb.g}, {active.colour.rgb.b}</p><p>XYZ {Object.values(active.colour.xyz).map(value => value.toFixed(1)).join(', ')} · Lab {Object.values(active.colour.lab).map(value => value.toFixed(1)).join(', ')}</p></div><label>Sample name <input aria-label="Sample name" value={sampleName} onChange={event => setSampleName(event.target.value)} /></label><button onClick={save}>Save sample</button></section><section><h2>Colour family</h2><div className="swatches">{analysis.tones.map(tone => <Swatch key={tone.name} tone={tone} selected={selectedTone === tone.name} onClick={() => selectTone(tone.name)} />)}</div></section><section><h2>Mix recipes</h2><RecipeCard recipe={analysis.recipes[selectedTone].simple} /><RecipeCard recipe={analysis.recipes[selectedTone].complex} /></section><section><h2>Check my mix</h2><p>Photograph a small, evenly lit dab and compare it with {active.name}.</p><label className="button secondary">Capture / import mix<input aria-label="Check my mix photo" type="file" accept="image/*" capture="environment" onChange={event => compare(event.target.files?.[0])} /></label></section></>}
     {samples.length > 0 && <section><h2>Saved samples ({samples.length})</h2>{samples.map(sample => <button key={sample.id} className="saved" onClick={() => selectSample(sample)}><i style={{ background: sample.colour.hex }} />{sample.name}</button>)}</section>}
     {history.length > 0 && <section><h2>Mix history ({history.length})</h2>{history.map(entry => <p key={entry.id}>{entry.tone}: {entry.recipe.complex.parts.map(part => part.paint.code).join(', ')}</p>)}</section>}
     <footer>Fixed catalogue: 105, 268, 270, 393, 366, 504, 535, 619, 409, 701.</footer>
